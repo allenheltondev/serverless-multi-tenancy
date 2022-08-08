@@ -1,0 +1,14 @@
+{
+  "pk": "authorizer",
+  "sk": "roles#",
+  "roles": [
+    {
+      "role": "admin",
+      "paths": {
+        "allow": [
+          "*"
+        ]
+      }
+    }
+  ]
+}

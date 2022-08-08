@@ -1,0 +1,13 @@
+{
+  "name": "add-tenant-to-user",
+  "version": "1.0.0",
+  "description": "Enables a user to access a new tenant",
+  "main": "index.js",
+  "author": "allenheltondev",
+  "license": "MIT",
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.142.0",
+    "@aws-sdk/util-dynamodb": "^3.142.0",
+    "http-status-codes": "^2.2.0"
+  }
+}

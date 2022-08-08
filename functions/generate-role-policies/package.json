@@ -1,0 +1,13 @@
+{
+  "name": "generate-role-policies",
+  "version": "1.0.0",
+  "description": "Generates the role policies for access control",
+  "main": "index.js",
+  "author": "allenheltondev",
+  "license": "MIT",
+  "scripts": {},
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.142.0",
+    "@aws-sdk/util-dynamodb": "^3.142.0"
+  }
+}

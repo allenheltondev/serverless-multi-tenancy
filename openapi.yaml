@@ -1,0 +1,359 @@
+openapi: 3.0.0
+info:
+  title: Parks API
+  description: |
+    Get involved with the administration of the United States State Parks! Each state manages their own parks.
+  version: 1.0.0
+
+x-amazon-apigateway-request-validators:
+  Validate All:
+    validateRequestParameters: true
+    validateRequestBody: true
+x-amazon-apigateway-gateway-responses:
+  BAD_REQUEST_BODY:
+    statusCode: 400
+    responseTemplates:
+      application/json: '{ "message": "$context.error.validationErrorString" }'
+  INVALID_API_KEY:
+    statusCode: 401
+    responseTemplates:
+      application/json: '{ "message": "Unauthorized" }'
+
+paths:
+  /parks:
+    get:
+      summary: View a list of parks for your state
+      description: Returns a list of state parks for your state
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParkList'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::Sub: ${GetParksRole.Arn}
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/Query
+        httpMethod: POST
+        type: aws
+        passthroughBehavior: 'never'
+        requestTemplates:
+          application/json:
+            Fn::Sub:
+              - |-
+                {
+                  "TableName": "${TableName}",
+                  "IndexName": "GSI1",
+                  "KeyConditionExpression": "#GSI1PK = :GSI1PK",
+                  "ExpressionAttributeNames": {
+                    "#GSI1PK": "GSI1PK"
+                  },
+                  "ExpressionAttributeValues": {
+                    ":GSI1PK": { "S": "$context.authorizer.customerId#park" }
+                  }
+                }
+              - { TableName: { Ref: TableName } }
+        responses:
+          200:
+            statusCode: 200
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($inputRoot = $input.path('$'))
+                {
+                  "items": [
+                    #foreach($elem in $inputRoot.Items) {
+                      "id": "$elem.keyParts.M.parkId.S",
+                      "name": "$elem.name.S",
+                      #if("$elem.status.S" != "")
+                      "status": "$elem.status.S"
+                      #else
+                      "status": "park-opened"
+                      #end
+                    }#if($foreach.hasNext),#end
+                    #end
+                  ]
+                }
+    post:
+      summary: Add a new park
+      description: Adds a new park to the current tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Park'
+      responses:
+        201:
+          $ref: '#/components/responses/Created'
+        400:
+          $ref: '#/components/responses/BadRequest'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::Sub: ${AddParkRole.Arn}
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/PutItem
+        httpMethod: POST
+        type: aws
+        passthroughBehavior: 'never'
+        requestTemplates:
+          application/json:
+            Fn::Sub:
+              - |-
+                #set($inputRoot = $input.path('$'))
+                {
+                  "TableName": "${TableName}",
+                  "Item": {
+                    "pk": { "S": "$context.authorizer.customerId#$input.path('$.id')" },
+                    "sk": { "S": "park#" },
+                    "GSI1PK": { "S": "$context.authorizer.customerId#park" },
+                    "GSI1SK": { "S": "$input.path('$.id')" },
+                    "keyParts": { "M": {
+                      "customerId": { "S": "$context.authorizer.customerIz" },
+                      "parkId": { "S": "$input.path('$.id')" }
+                    }},
+                    "status": { "S": "$input.path('$.status')" },
+                    "name": { "S": "$input.path('$.name')" },
+                    "createdDate": { "S": "$context.requestTime" }         
+                  },
+                  "ReturnValues": "NONE"
+                }
+              - { TableName: { Ref: TableName } }
+        responses:
+          200:
+            statusCode: 201
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                {
+                  "id": "$method.request.body.id"
+                }
+
+  /parks/{parkId}/statuses:
+    post:
+      summary: Update the status of a park
+      description: Update park status and notify subscribers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParkStatus'
+      responses:
+        204:
+          $ref: '#/components/responses/NoContent'
+        400:
+          $ref: '#/components/responses/BadRequest'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::Sub: ${UpdateParkStatusRole.Arn}
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:states:action/StartSyncExecution
+        httpMethod: POST
+        type: aws
+        requestTemplates:
+          application/json:
+            Fn::Sub:  
+              - |-
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($body = "{""detail"" : $input.json('$'), ""customerId"": ""$context.authorizer.customerId"", ""parkId"": ""$input.params('parkId')""}")
+                {
+                    "input": "$util.escapeJavaScript($body)",
+                    "stateMachineArn": "${StateMachine}"
+                }
+              - { StateMachine: { "Ref": "UpdateParkStatusStateMachine" }}
+        responses:
+          200:
+            statusCode: 204
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($inputRoot = $input.path('$'))
+                #set($output = $util.parseJson($input.path('$.output')))
+                #if("$inputRoot.error" == "UnhandledError")
+                  #set($context.responseOverride.status = 500)
+                  {
+                  "message": "$inputRoot.cause"
+                  }
+                #end
+
+  /parks/{parkId}/webhooks:
+    post:
+      summary: Subscribe to notifications for a park
+      description: Register for webhook when specific events occur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookSubscription'
+      responses:
+        201:
+          $ref: '#/components/responses/Created'
+        400:
+          $ref: '#/components/responses/BadRequest'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::Sub: ${SubscribeWebhookRole.Arn}
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:states:action/StartSyncExecution
+        httpMethod: POST
+        type: aws
+        requestTemplates:
+          application/json:
+            Fn::Sub:  
+              - |-
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($body = "{""detail"" : $input.json('$'), ""customerId"": ""$context.authorizer.customerId"", ""id"": ""$context.requestId"", ""parkId"": ""$input.params('parkId')""}")
+                {
+                    "input": "$util.escapeJavaScript($body)",
+                    "stateMachineArn": "${StateMachine}"
+                }
+              - { StateMachine: { "Ref": "SubscribeWebhookStateMachine" }}
+        responses:
+          200:
+            statusCode: 201
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($inputRoot = $input.path('$'))
+                #set($output = $util.parseJson($input.path('$.output')))
+                {
+                  #if("$output.id" != "")
+                    "id": "$output.id"
+                  #end                  
+                  #if("$inputRoot.error" == "UnhandledError")
+                    #set($context.responseOverride.status = 500)
+                    "message": "$inputRoot.cause"
+                  #end                  
+                }
+components:
+  schemas:
+    ParkList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+            properties:
+              id:
+                type: string
+              name: 
+                type: string
+    
+    WebhookSubscription:
+      type: object
+      required:
+        - eventType
+        - endpoint
+      properties:
+        eventType:
+          type: string
+          enum: 
+            - park-closed
+            - park-opened
+            - natural-disaster
+        endpoint:
+          type: string
+
+    ParkStatus:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: 
+            - park-closed
+            - park-reopened
+            - natural-disaster
+
+    Park:
+      type: object
+      required:
+        - name
+        - id
+      properties:
+        name:
+          type: string
+        id: 
+          type: string
+          pattern: ^[a-z]*$
+        status:
+          enum: 
+            - park-closed
+            - park-reopened
+            - natural-disaster
+
+  responses:    
+    Created:
+      description: Successfully added into the system
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - id
+            properties:
+              id:
+                type: string
+                description: The identifier for the new entity
+                example: igdLLki4no9ey1aN2rAB3s
+    BadRequest:
+      description: Unable to process request. Likely due to improperly formatted request.
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - message
+            properties:
+              message:
+                type: string
+                description: Message detailing what went wrong
+                example: The 'name' field is required and is missing.
+    NotFound:
+      description: Unable to find entity with a given identifier
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - message
+            properties:
+              message:
+                type: string
+                description: Message stating the entity was not found
+                example: Unable to find entity with the provided id
+    UnknownError:
+      description: An unexpected error occurred on the server.
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - message
+            properties:
+              message:
+                type: string
+                description: Unknown error message
+                example: An unexpected error occurred.
+    NoContent:
+      description: A blank response is returned indicating success

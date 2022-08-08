@@ -1,0 +1,163 @@
+{
+  "Comment": "Subscribes an endpoint to a customer, park, and event specific topic",
+  "StartAt": "Load Existing Webhook Event",
+  "States": {
+    "Load Existing Webhook Event": {
+      "Type": "Task",
+      "Resource": "${DynamoDbGetItem}",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('{}#{}#{}', $.customerId, $.parkId, $.detail.eventType)"
+          },
+          "sk": {
+            "S": "event#"
+          }
+        }
+      },
+      "Next": "Does Webhook Event Exist?",
+      "ResultPath": "$.webhookEvent",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Unhandled Exception"
+        }
+      ]
+    },
+    "Unhandled Exception": {
+      "Type": "Fail",
+      "Error": "UnhandledError",
+      "Cause": "Something went wrong"
+    },
+    "Does Webhook Event Exist?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.webhookEvent.Item",
+          "IsPresent": true,
+          "Next": "Format State For Existing Webhook Event"
+        }
+      ],
+      "Default": "CreateTopic"
+    },
+    "Format State For Existing Webhook Event": {
+      "Type": "Pass",
+      "Next": "Subscribe to Topic",
+      "Parameters": {
+        "topic.$": "$.webhookEvent.Item.topic.S"
+      }
+    },
+    "Subscribe to Topic": {
+      "Type": "Task",
+      "Parameters": {
+        "Protocol": "https",
+        "TopicArn.$": "$.topic",
+        "Endpoint.$": "$$.Execution.Input.detail.endpoint",
+        "ReturnSubscriptionArn": true
+      },
+      "Resource": "${SnsSubscribe}",
+      "Next": "Save Subscription",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Unhandled Exception"
+        }
+      ]
+    },
+    "Save Subscription": {
+      "Type": "Task",
+      "Resource": "${DynamoDbPutItem}",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Item": {
+          "pk": {
+            "S.$": "States.Format('{}#{}', $$.Execution.Input.customerId, $$.Execution.Input.id)"
+          },
+          "sk": {
+            "S": "subscription#"
+          },
+          "subscriptionArn": {
+            "S.$": "$.SubscriptionArn"
+          },
+          "createdDate": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "Next": "Format Output",
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Unhandled Exception"
+        }
+      ]
+    },
+    "Format Output": {
+      "Type": "Pass",
+      "End": true,
+      "Parameters": {
+        "id.$": "$$.Execution.Input.id"
+      }
+    },
+    "CreateTopic": {
+      "Type": "Task",
+      "Parameters": {
+        "Name.$": "States.Format('{}-{}-{}', $.customerId, $.parkId, $.detail.eventType)"
+      },
+      "Resource": "${SnsCreateTopic}",
+      "ResultPath": "$.topic",
+      "Next": "Create Webhook Event",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Unhandled Exception"
+        }
+      ]
+    },
+    "Create Webhook Event": {
+      "Type": "Task",
+      "Resource": "${DynamoDbPutItem}",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Item": {
+          "pk": {
+            "S.$": "States.Format('{}#{}#{}', $.customerId, $.parkId, $.detail.eventType)"
+          },
+          "sk": {
+            "S": "event#"
+          },
+          "topic": {
+            "S.$": "$.topic.TopicArn"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "Format State For New Webhook Event",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Unhandled Exception"
+        }
+      ]
+    },
+    "Format State For New Webhook Event": {
+      "Type": "Pass",
+      "Parameters": {
+        "topic.$": "$.topic.TopicArn"
+      },
+      "Next": "Subscribe to Topic"
+    }
+  }
+}

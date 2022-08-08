@@ -1,0 +1,9 @@
+{
+  "name": "serverless-multi-tenancy",
+  "version": "1.0.0",
+  "description": "This is an example repository to illustrate concepts for a multi-tenant application",
+  "scripts": {
+    "diagram": "cfn-dia draw.io -t template.yaml -o diagrams/infrastructure-diagram.drawio -c && drawio diagrams/infrastructure-diagram.drawio -o diagrams/infrastructure-diagram.png"
+  },
+  "license": "MIT"
+}

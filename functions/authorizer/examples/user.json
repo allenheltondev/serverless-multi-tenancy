@@ -1,0 +1,63 @@
+{
+  "pk": {
+    "S": "exampleusersub"
+  },
+  "sk": {
+    "S": "user#"
+  },
+  "email": {
+    "S": "allenheltondev@gmail.com"
+  },
+  "customers": {
+    "L": [
+      {
+        "M": {
+          "id": {
+            "S": "texas"
+          },
+          "roles": {
+            "L": [
+              {
+                "S": "admin"
+              },
+              {
+                "S": "member"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "M": {
+          "id": {
+            "S": "colorado"
+          },
+          "roles": {
+            "L": [
+              {
+                "S": "visitor"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "active": {
+    "M": {
+      "customerId": {
+        "S": "texas"
+      }
+    }
+  },
+  "details": {
+    "M": {
+      "firstName": {
+        "S": "Allen"
+      },
+      "lastName": {
+        "S": "Helton"
+      }
+    }
+  }
+}

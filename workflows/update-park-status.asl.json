@@ -1,0 +1,78 @@
+{
+  "Comment": "Updates the status of a park",
+  "StartAt": "Update Park",
+  "States": {
+    "Update Park": {
+      "Type": "Task",
+      "Resource": "${DynamoDbUpdateItem}",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('{}#{}', $.customerId, $.parkId)"
+          },
+          "sk": {
+            "S": "park#"
+          }
+        },
+        "UpdateExpression": "SET #status = :status",
+        "ExpressionAttributeNames": {
+          "#pk": "pk",
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S.$": "$.detail.status"
+          }
+        },
+        "ConditionExpression": "attribute_exists(#pk)"
+      },
+      "ResultPath": null,
+      "Next": "Get Topic For Status Change"
+    },
+    "Get Topic For Status Change": {
+      "Type": "Task",
+      "Resource": "${DynamoDbGetItem}",
+      "Parameters": {
+        "TableName": "${TableName}",
+        "Key": {
+          "pk": {
+            "S.$": "States.Format('{}#{}#{}', $.customerId, $.parkId, $.detail.status)"
+          },
+          "sk": {
+            "S": "event#"
+          }
+        }
+      },
+      "Next": "Does Topic Exist?",
+      "ResultPath": "$.event"
+    },
+    "Does Topic Exist?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.event.Item",
+          "IsPresent": true,
+          "Next": "Publish to Webhooks"
+        }
+      ],
+      "Default": "Success"
+    },
+    "Publish to Webhooks": {
+      "Type": "Task",
+      "Resource": "${SnsPublish}",
+      "Parameters": {
+        "TopicArn.$": "$.event.Item.topic.S",
+        "Message": {
+          "parkId.$": "$$.Execution.Input.parkId",
+          "status.$": "$$.Execution.Input.detail.status",
+          "time.$": "$$.State.EnteredTime"
+        }
+      },
+      "Next": "Success"
+    },
+    "Success": {
+      "Type": "Succeed"
+    }
+  }
+}

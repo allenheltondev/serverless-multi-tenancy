@@ -1,0 +1,302 @@
+openapi: 3.0.0
+info:
+  title: Users API
+  description: |
+    API around user management
+  version: 1.0.0
+
+x-amazon-apigateway-request-validators:
+  Validate All:
+    validateRequestParameters: true
+    validateRequestBody: true
+x-amazon-apigateway-gateway-responses:
+  BAD_REQUEST_BODY:
+    statusCode: 400
+    responseTemplates:
+      application/json: '{ "message": "$context.error.validationErrorString" }'
+  INVALID_API_KEY:
+    statusCode: 401
+    responseTemplates:
+      application/json: '{ "message": "Unauthorized" }'
+
+paths:
+  /settings:
+    put:
+      summary: Update active settings for the caller
+      description: Allows the caller to update their active settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActiveUserDetails'
+      responses:
+        204:
+          $ref: '#/components/responses/NoContent'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateActiveTenantFunction.Arn}/invocations
+        httpMethod: POST
+        type: aws_proxy
+    get:
+      summary: View current settings 
+      description: Gets the current configured settings for the caller
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerList'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::Sub: ${GetUserSettingsRole.Arn}
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/GetItem
+        httpMethod: POST
+        type: aws
+        passthroughBehavior: 'never'
+        requestTemplates:
+          application/json:
+            Fn::Sub:
+              - |-
+                {
+                  "TableName": "${TableName}",
+                  "Key": {
+                    "pk": { "S": "$context.authorizer.userId"},
+                    "sk": { "S": "user#" }
+                  }                  
+                }
+              - { TableName: { Ref: TableName } }
+        responses:
+          200:
+            statusCode: 200
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($inputRoot = $input.path('$'))
+                {
+                  "active": {
+                    "customerId": "$inputRoot.Item.active.M.customerId.S",
+                    "roles": [
+                      #foreach($elem in $inputRoot.Item.customers.L)                      
+                        #if($elem.M.id.S == $inputRoot.Item.active.M.customerId.S)
+                          #foreach($role in $elem.M.roles.L)
+                            "$role.S"
+                            #if($foreach.hasNext),#end
+                          #end
+                        #end
+                      #end
+                    ]
+                  }
+                }
+
+  /customers:
+    post:
+      summary: Add a new customer to the caller
+      description: Updates the caller with access to a new customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Customer'
+      responses:
+        204:
+          $ref: '#/components/responses/NoContent'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddTenantToUserFunction.Arn}/invocations
+        httpMethod: POST
+        type: aws_proxy
+    get:
+      summary: View a list of customers the caller is a member of
+      description: Returns a list of customers the caller is a part of
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerList'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        credentials:
+          Fn::Sub: ${GetTenantsRole.Arn}
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:dynamodb:action/GetItem
+        httpMethod: POST
+        type: aws
+        passthroughBehavior: 'never'
+        requestTemplates:
+          application/json:
+            Fn::Sub:
+              - |-
+                {
+                  "TableName": "${TableName}",
+                  "Key": {
+                    "pk": { "S": "$context.authorizer.userId"},
+                    "sk": { "S": "user#" }
+                  }                  
+                }
+              - { TableName: { Ref: TableName } }
+        responses:
+          200:
+            statusCode: 200
+            responseTemplates:
+              application/json: |
+                #set($context.responseOverride.header.Access-Control-Allow-Origin = '*')
+                #set($inputRoot = $input.path('$'))
+                {
+                  "items": [
+                    #foreach($elem in $inputRoot.Item.customers.L) {
+                      "id": "$elem.M.id.S",
+                      "roles": [
+                        #foreach($role in $elem.M.roles.L)
+                          "$role.S"
+                          #if($foreach.hasNext),#end
+                        #end
+                      ]                      
+                    }#if($foreach.hasNext),#end
+                    #end
+                  ]
+                }
+
+  /customers/{customerId}/roles:
+    parameters:
+      - $ref: '#/components/parameters/customerId'
+    put:
+      summary: Sets the roles that apply for a specific customer
+      description: Replaces the existing roles for a customer with the provided values
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerRoles'
+      responses:
+        204:
+          $ref: '#/components/responses/NoContent'
+        400:
+          $ref: '#/components/responses/BadRequest'
+        500:
+          $ref: '#/components/responses/UnknownError'
+      x-amazon-apigateway-request-validator: Validate All
+      x-amazon-apigateway-integration:
+        uri:
+          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateTenantRolesFunction.Arn}/invocations
+        httpMethod: POST
+        type: aws_proxy
+    
+components:
+  parameters:
+    customerId:
+      name: customerId
+      in: path
+      description: Unique identifier for a customer
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    ActiveUserDetails:
+      type: object
+      required:
+        - customerId
+      properties:
+        customerId:
+          type: string
+    
+    Customer:
+      type: object
+      required:
+        - id
+        - roles
+      properties:
+        id:
+          type: string
+        roles:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - admin
+              - member
+              - visitor
+        makeActive:
+          type: boolean
+
+    CustomerList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - roles
+            properties:
+              id:
+                type: string
+              roles:
+                type: array
+                items:
+                  type: string
+
+    CustomerRoles:
+      type: object
+      required:
+        - roles
+      properties:
+        roles:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+              - admin
+              - member
+              - visitor
+    
+  responses:    
+    BadRequest:
+      description: Unable to process request. Likely due to improperly formatted request.
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - message
+            properties:
+              message:
+                type: string
+                description: Message detailing what went wrong
+                example: The 'name' field is required and is missing.
+    UnknownError:
+      description: An unexpected error occurred on the server.
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - message
+            properties:
+              message:
+                type: string
+                description: Unknown error message
+                example: An unexpected error occurred.
+    NoContent:
+      description: A blank response is returned indicating success

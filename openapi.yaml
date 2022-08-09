@@ -116,7 +116,7 @@ paths:
                     "GSI1PK": { "S": "$context.authorizer.customerId#park" },
                     "GSI1SK": { "S": "$input.path('$.id')" },
                     "keyParts": { "M": {
-                      "customerId": { "S": "$context.authorizer.customerIz" },
+                      "customerId": { "S": "$context.authorizer.customerId" },
                       "parkId": { "S": "$input.path('$.id')" }
                     }},
                     "status": { "S": "$input.path('$.status')" },
